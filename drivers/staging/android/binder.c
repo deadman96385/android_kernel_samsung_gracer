@@ -2792,6 +2792,9 @@ static int binder_ioctl_set_ctx_mgr(struct file *filp)
 		ret = -EBUSY;
 		goto out;
 	}
+	ret = security_binder_set_context_mgr(proc->tsk);
+	if (ret < 0)
+		goto out;
 	if (uid_valid(binder_context_mgr_uid)) {
 		if (!uid_eq(binder_context_mgr_uid, curr_euid)) {
 			pr_err("BINDER_SET_CONTEXT_MGR bad uid %d != %d\n",
@@ -2856,9 +2859,6 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case BINDER_SET_CONTEXT_MGR:
 		ret = binder_ioctl_set_ctx_mgr(filp);
 		if (ret)
-			goto err;
-		ret = security_binder_set_context_mgr(proc->tsk);
-		if (ret < 0)
 			goto err;
 		break;
 	case BINDER_THREAD_EXIT:
@@ -3757,21 +3757,33 @@ static int binder_process_transaction_show(struct seq_file *m, void *unused)
 	struct binder_proc *proc;
 	int res, ppid;
 	char * title;
+	int do_lock = !binder_debug_no_lock;
 
 	title = kmalloc(MAX_PROCTITLE_LEN, GFP_KERNEL);
 	if (!title)
 		return -1;
 
+	if (do_lock)
+		binder_lock(__func__);
+
 	hlist_for_each_entry(proc, &binder_procs, proc_node) {
 		// Don't let show any daemon's binder count
 		ppid = proc->tsk->group_leader->parent->pid;
+
+		preempt_enable_no_resched();
 		res = get_cmdline(proc->tsk, title, MAX_PROCTITLE_LEN);
+		preempt_disable();
+
 		if (proc->stats.process_bnd_cnt && ppid != 1 && ppid != 2) {
 			seq_printf(m, "%d_%d_%s\n", proc->pid,
 					proc->stats.process_bnd_cnt,
 					res == 0 ? proc->tsk->comm : title);
 		}
 	}
+
+	if (do_lock)
+		binder_unlock(__func__);
+
 	kfree(title);
 
 	return 0;

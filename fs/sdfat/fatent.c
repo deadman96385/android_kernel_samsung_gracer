@@ -276,6 +276,9 @@ static s32 fat12_ent_set(struct super_block *sb, u32 loc, u32 content)
 				return -EIO;
 
 			fat_sector = fcache_getblk(sb, ++sec);
+			if (!fat_sector)
+				return -EIO;
+
 			fat_sector[0] = (u8)((fat_sector[0] & 0xF0) | (content >> 8));
 		} else {
 			fat_entry = &(fat_sector[off]);
@@ -350,6 +353,13 @@ s32 fat_ent_get(struct super_block *sb, u32 loc, u32 *content)
 		sdfat_fs_error(sb, "failed to access to FAT "
 				"(entry 0x%08x, err:%d)", loc, err);
 		return err;
+	}
+
+	if (*content && !IS_CLUS_EOF(*content) &&
+		(*content < CLUS_BASE || fsi->num_clusters <= *content)) {
+		sdfat_fs_error(sb, "invalid access to FAT (entry 0x%08x) "
+			"bogus content (0x%08x)", loc, *content);
+		return -EIO;
 	}
 
 	return 0;

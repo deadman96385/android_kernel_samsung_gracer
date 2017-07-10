@@ -89,7 +89,8 @@
 #define SEC_TS_NVM_OFFSET_FAC_RESULT	0
 #define SEC_TS_NVM_OFFSET_CAL_COUNT	1
 #define SEC_TS_NVM_OFFSET_DISASSEMBLE_COUNT	2
-#define SEC_TS_NVM_OFFSET_LENGTH SEC_TS_NVM_OFFSET_DISASSEMBLE_COUNT + 1
+#define SEC_TS_NVM_OFFSET_CAL_POS	3
+#define SEC_TS_NVM_OFFSET_LENGTH SEC_TS_NVM_OFFSET_CAL_POS + 1
 
 /* SEC_TS READ REGISTER ADDRESS */
 #define SEC_TS_READ_FW_STATUS		0x51
@@ -561,6 +562,8 @@ struct sec_ts_data {
 #endif
 	int nv;
 	int cal_count;
+	int cal_pos;
+	bool external_factory;
 
 #ifdef SMARTCOVER_COVER
 	bool smart_cover[MAX_BYTE][MAX_TX];

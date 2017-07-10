@@ -118,6 +118,7 @@ static void run_self_delta_read(void *device_data);
 static void run_self_delta_read_all(void *device_data);
 static void get_selfcap(void *device_data);
 static void run_force_calibration(void *device_data);
+static void set_external_factory(void *device_data);
 static void get_force_calibration(void *device_data);
 static void set_tsp_test_result(void *device_data);
 static void get_tsp_test_result(void *device_data);
@@ -196,6 +197,7 @@ struct ft_cmd ft_cmds[] = {
 	{FT_CMD("get_selfcap", get_selfcap),},
 	{FT_CMD("run_force_calibration", run_force_calibration),},
 	{FT_CMD("get_force_calibration", get_force_calibration),},
+	{FT_CMD("set_external_factory", set_external_factory),},
 	{FT_CMD("run_trx_short_test", run_trx_short_test),},
 	{FT_CMD("set_tsp_test_result", set_tsp_test_result),},
 	{FT_CMD("get_tsp_test_result", get_tsp_test_result),},
@@ -1556,6 +1558,7 @@ static void get_checksum_data(void *device_data)
 	char buff[16] = { 0 };
 	char csum_result[4] = { 0 };
 	u8 nv_result;
+	char data[5] = { 0 };
 	u8 cal_result;
 	u8 temp = 0;
 	u8 csum = 0;
@@ -1567,6 +1570,44 @@ static void get_checksum_data(void *device_data)
 		snprintf(buff, sizeof(buff), "%s", "TSP turned off");
 		goto err;
 	}
+
+	disable_irq(ts->client->irq);
+
+	ts->plat_data->power(ts, false);
+	ts->power_status = SEC_TS_STATE_POWER_OFF;
+	sec_ts_delay(50);
+
+	ts->plat_data->power(ts, true);
+	ts->power_status = SEC_TS_STATE_POWER_ON;
+	sec_ts_delay(70);
+	
+	ret = sec_ts_wait_for_ready(ts, SEC_TS_ACK_BOOT_COMPLETE);
+	if (ret < 0) {
+		enable_irq(ts->client->irq);
+		input_err(true, &ts->client->dev, "%s: boot complete failed\n", __func__);
+		snprintf(buff, sizeof(buff), "%s", "NG");
+		goto err;
+	}
+
+	ret = ts->sec_ts_i2c_read(ts, SEC_TS_READ_BOOT_STATUS, &data[1], 1);
+	if (ret < 0 || (data[1] != SEC_TS_STATUS_APP_MODE)) {
+		enable_irq(ts->client->irq);
+		input_err(true, &ts->client->dev, "%s: boot status failed, ret:%d, data:%X\n", __func__, ret, data[0]);
+		snprintf(buff, sizeof(buff), "%s", "NG");
+		goto err;
+	}
+
+	ret = ts->sec_ts_i2c_read(ts, SEC_TS_READ_TS_STATUS, &data[2], 4);
+	if (ret < 0 || (data[3] == TOUCH_SYSTEM_MODE_FLASH)) {
+		enable_irq(ts->client->irq);
+		input_err(true, &ts->client->dev, "%s: touch status failed, ret:%d, data:%X\n", __func__, ret, data[3]);
+		snprintf(buff, sizeof(buff), "%s", "NG");
+		goto err;
+	}
+
+	enable_irq(ts->client->irq);
+
+	input_err(true, &ts->client->dev, "%s: data[0]:%X, data[1]:%X, data[3]:%X\n", __func__, data[0], data[1], data[3]);
 
 	temp = DO_FW_CHECKSUM | DO_PARA_CHECKSUM;
 	ret = ts->sec_ts_i2c_write(ts, SEC_TS_CMD_GET_CHECKSUM, &temp, 1);
@@ -2932,6 +2973,20 @@ static void get_force_calibration(void *device_data)
 	input_info(true, &ts->client->dev, "%s: %s\n", __func__, buff);
 }
 
+static void set_external_factory(void *device_data)
+{
+	struct sec_ts_data *ts = (struct sec_ts_data *)device_data;
+	char buff[CMD_STR_LEN] = {0};
+
+	set_default_result(ts);
+
+	ts->external_factory = true;
+	snprintf(buff, sizeof(buff), "%s", "OK");
+
+	set_cmd_result(ts, buff, strnlen(buff, sizeof(buff)));
+	input_info(true, &ts->client->dev, "%s: %s\n", __func__, buff);
+}
+
 static void run_force_calibration(void *device_data)
 {
 	struct sec_ts_data *ts = (struct sec_ts_data *)device_data;
@@ -2995,6 +3050,26 @@ static void run_force_calibration(void *device_data)
 		ts->cal_count = get_tsp_nvm_data(ts, SEC_TS_NVM_OFFSET_CAL_COUNT);
 #endif
 
+		/* Save nv data   cal_position 
+		 * 0xE0 :  External
+		 * 0x01 :  LCiA
+		 * 0xFF :  Developer/Tech -Default
+		 */
+		if (ts->external_factory)  ts->cal_pos = 0xE0;
+		else  ts->cal_pos = 0x01;
+		buff[0] = SEC_TS_NVM_OFFSET_CAL_POS;
+		buff[1] = 0;
+		buff[2] = ts->cal_pos;
+		input_info(true, &ts->client->dev, "%s: write to nvm cal_pos(0x%2X)\n",
+					__func__, buff[2]);
+		
+		rc = ts->sec_ts_i2c_write(ts, SEC_TS_CMD_NVM, buff, 3);
+		if (rc < 0) {
+			input_err(true, &ts->client->dev,
+				"%s: nvm write failed. ret: %d\n", __func__, rc);
+		}
+		sec_ts_delay(20);
+
 		if(ts->plat_data->mis_cal_check){
 
 			buff[0] = 0;			
@@ -3036,6 +3111,7 @@ static void run_force_calibration(void *device_data)
 
 out_force_cal:
 	set_cmd_result(ts, buff, strnlen(buff, sizeof(buff)));
+	ts->external_factory = false;
 
 	mutex_lock(&ts->cmd_lock);
 	ts->cmd_is_running = false;

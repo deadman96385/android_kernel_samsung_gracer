@@ -570,6 +570,9 @@ static void busmon_report_route(struct busmon_dev *busmon,
 	struct busmon_masterinfo *master = NULL;
 	struct busmon_rpathinfo *rpath = NULL;
 	unsigned int val, id, user;
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+	char temp_buf[SZ_128];
+#endif
 
 	val = __raw_readl(node->regs + offset + REG_INT_INFO);
 	id = BIT_ID_VAL(val);
@@ -594,10 +597,12 @@ static void busmon_report_route(struct busmon_dev *busmon,
 				"Master IP:%s's %s ---> Target:%s\n",
 				master->port_name, master->master_name, rpath->dest_name);
 
-#ifdef CONFIG_SEC_DEBUG
-			sec_debug_store_extra_buf(INFO_BUSMON, "Master IP:%s's %s ---> Target:%s\n",
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			snprintf(temp_buf, SZ_128, "Master IP:%s's %s ---> Target:%s\n",
 				master->port_name, master->master_name, rpath->dest_name);
+			sec_debug_set_extra_info_busmon(temp_buf);
 #endif
+
 			busmon_post_handler_by_master(busmon, group,
 							master->port_name,
 							master->master_name,
@@ -695,15 +700,6 @@ static void busmon_report_info(struct busmon_dev *busmon,
 		pr_info("Unknown Error - offset:%u\n", offset);
 		break;
 	}
-
-#ifdef CONFIG_SEC_DEBUG
-	sec_debug_store_extra_buf(INFO_BUSMON, "Detect reason   : %s\n"
-		"Target address  : 0x%llX\n"
-		"Error type      : %s",
-		node->comment,
-		(unsigned long long)((info1 & (GENMASK(3, 0)) << 32) | info0),
-		busmon_errcode[errcode]);
-#endif
 
 	pr_auto(ASL3, "\n--------------------------------------------------------------------------------\n"
 		"Transaction information => [%s, %s] Fail to access\n\n"
