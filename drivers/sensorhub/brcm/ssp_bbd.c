@@ -324,7 +324,7 @@ void bbd_mcu_ready_work_func(struct work_struct *work)
 	int ret = 0;
 	int retries = 0;
 
-	//msleep(1000);
+	
 	if(data->vdd_mcu_1p8_name != NULL){
 		//clean_pending_list(data);
 		ret = wait_for_completion_timeout(&data->hub_data->mcu_init_done, COMPLETION_TIMEOUT);
@@ -332,7 +332,9 @@ void bbd_mcu_ready_work_func(struct work_struct *work)
 			pr_err("[SSPBBD] Sensors of MCU are not ready!\n");			
 		} else
 			pr_err("[SSPBBD] Sensors of MCU are ready!\n");	
-	}	
+	}
+	else
+		msleep(1000); //this model doesn't vdd divided
 
 	dprint("MCU is ready.(work_queue)\n");
 
@@ -651,14 +653,16 @@ int callback_bbd_on_packet(void *ssh_data, const char *buf, size_t size)
 		*/
 		required = (remain < ssp_pkt.required)?
 		      		remain : ssp_pkt.required;
-		BUG_ON(ssp_pkt.rxlen + required >= MAX_SSP_DATA_SIZE);
-
+		//BUG_ON(ssp_pkt.rxlen + required >= MAX_SSP_DATA_SIZE);
+        if(ssp_pkt.rxlen + required >= MAX_SSP_DATA_SIZE)
+            return -1;
+        
 		memcpy(&ssp_pkt.buf[ssp_pkt.rxlen], buf + idx, required);
 		ssp_pkt.rxlen += required;
 		ssp_pkt.required -= required;
 		idx += required;
 
-		BUG_ON(ssp_pkt.required < 0);
+		//BUG_ON(ssp_pkt.required < 0);
 		if (ssp_pkt.required)
 			continue;
 
