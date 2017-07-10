@@ -372,6 +372,13 @@ void DISP_SS_EVENT_LOG(disp_ss_event_t type, struct v4l2_subdev *sd, ktime_t tim
 	case DISP_EVT_WB_SW_TRIGGER:
 	case DISP_EVT_DECON_SHUTDOWN:
 	case DISP_EVT_RSC_CONFLICT:
+#ifdef CONFIG_DECON_SELF_REFRESH
+	case DISP_EVT_DSR_ENABLE:
+	case DISP_EVT_DSR_DISABLE:
+#endif
+	case DISP_EVT_ENT_UPDATE:
+	case DISP_EVT_PARTIAL_UPDATE:
+	case DISP_EVT_START_VPP_SET:
 		disp_ss_event_log_decon(type, sd, time);
 		break;
 	case DISP_EVT_DSIM_FRAMEDONE:
@@ -383,6 +390,7 @@ void DISP_SS_EVENT_LOG(disp_ss_event_t type, struct v4l2_subdev *sd, ktime_t tim
 	case DISP_EVT_VPP_FRAMEDONE:
 	case DISP_EVT_VPP_STOP:
 	case DISP_EVT_VPP_WINCON:
+	case DISP_EVT_VPP_SET_RUNNING:
 		disp_ss_event_log_vpp(type, sd, time);
 		break;
 	default:
@@ -582,6 +590,14 @@ void DISP_SS_EVENT_SHOW(struct seq_file *s, struct decon_device *decon)
 		case DISP_EVT_WIN_CONFIG:
 			seq_printf(s, "%20s  %20s", "WIN_CONFIG", "-\n");
 			break;
+#ifdef CONFIG_DECON_SELF_REFRESH
+		case DISP_EVT_DSR_ENABLE:
+			seq_printf(s, "%20s  %20s", "DSR_ENABLE", "-\n");
+			break;
+		case DISP_EVT_DSR_DISABLE:
+			seq_printf(s, "%20s  %20s", "DSR_DISABLE", "-\n");
+			break;
+#endif
 		case DISP_EVT_TE_INTERRUPT:
 			prev_ktime = ktime_sub(log->time, prev_ktime);
 			seq_printf(s, "%20s  ", "TE_INTERRUPT");

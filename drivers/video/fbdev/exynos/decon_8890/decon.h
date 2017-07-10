@@ -524,6 +524,13 @@ typedef enum disp_ss_event_type {
 	DISP_EVT_ACT_VSYNC,
 	DISP_EVT_DEACT_VSYNC,
 	DISP_EVT_WIN_CONFIG,
+#ifdef	CONFIG_DECON_SELF_REFRESH
+	DISP_EVT_DSR_ENABLE,
+	DISP_EVT_DSR_DISABLE,
+#endif
+	DISP_EVT_ENT_UPDATE,
+	DISP_EVT_PARTIAL_UPDATE,
+	DISP_EVT_START_VPP_SET,
 
 	/* Related with interrupt */
 	DISP_EVT_TE_INTERRUPT,
@@ -549,6 +556,7 @@ typedef enum disp_ss_event_type {
 	DISP_EVT_VPP_SHADOW_UPDATE,
 	DISP_EVT_VPP_SUSPEND,
 	DISP_EVT_VPP_RESUME,
+	DISP_EVT_VPP_SET_RUNNING,
 
 	/* Related with PM */
 	DISP_EVT_DECON_SUSPEND,
@@ -834,14 +842,21 @@ struct decon_device {
 	ktime_t				trig_mask_timestamp;
 	int                             frame_idle;
 	int				eint_status;
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+	int eint_pend_for_big;
+#endif
 	struct work_struct		fifo_irq_work;
 	struct workqueue_struct		*fifo_irq_wq;
 	int				fifo_irq_status;
 	int				re_cnt;
 	int				win_id[2];
 	int				vpp_id[2];
-	bool				vpp_afbc_re;
-	
+	bool			vpp_afbc_re;
+
+#ifdef CONFIG_DECON_SELF_REFRESH
+	bool dsr_on;
+#endif
+
 	bool	ignore_vsync;
 	struct esd_protect esd;
 	unsigned int			force_fullupdate;
@@ -1042,6 +1057,9 @@ static inline bool decon_lpd_enter_cond(struct decon_device *decon)
 #ifdef CONFIG_LCD_HMT
 		&& (!dsim->priv.hmt_on)
 #endif
+#ifdef CONFIG_DECON_SELF_REFRESH
+		&& (!decon->dsr_on)
+#endif
 		&& (atomic_inc_return(&decon->lpd_trig_cnt) >= DECON_ENTER_LPD_CNT));
 }
 
@@ -1069,6 +1087,10 @@ static inline u32 win_end_pos(int x, int y,  u32 xres, u32 yres)
 #define S3CFB_WIN_SET_CHROMA		_IOW('F', 205, \
 						struct s3c_fb_user_chroma)
 #define S3CFB_SET_VSYNC_INT		_IOW('F', 206, __u32)
+
+#ifdef CONFIG_DECON_SELF_REFRESH
+#define S3CFB_DECON_SELF_REFRESH	_IOW('F', 207, __u32)
+#endif
 
 #define S3CFB_GET_ION_USER_HANDLE	_IOWR('F', 208, \
 						struct s3c_fb_user_ion_client)

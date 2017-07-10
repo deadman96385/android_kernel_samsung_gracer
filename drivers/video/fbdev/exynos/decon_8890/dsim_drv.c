@@ -366,7 +366,7 @@ int dsim_read_hl_data(struct dsim_device *dsim, u8 addr, u32 size, u8 *buf)
 
 try_read:
 	ret = dsim_read_data(dsim, MIPI_DSI_DCS_READ, (u32)addr, size, buf);
-	dsim_info("%s read ret : %d\n", __func__, ret);
+//	dsim_info("%s read ret : %d\n", __func__, ret);
 	if (ret != size) {
 		if (--retry)
 			goto try_read;
@@ -1022,7 +1022,9 @@ int dsim_set_panel_power(struct dsim_device *dsim, bool on)
 
 static int dsim_enable(struct dsim_device *dsim)
 {
+#ifdef CONFIG_LCD_DOZE_MODE
 	struct decon_device *decon = (struct decon_device *)dsim->decon;
+#endif
 
 	pr_info("%s ++\n", __func__);
 	if (dsim->state == DSIM_STATE_HSCLKEN) {
@@ -1094,7 +1096,6 @@ static int dsim_enable(struct dsim_device *dsim)
 	}
 #else
 	call_panel_ops(dsim, displayon, dsim);
-	decon->req_display_on = 1;
 #endif
 
 exit_dsim_enable:
@@ -1207,6 +1208,9 @@ static int dsim_doze_enable(struct dsim_device *dsim)
 	}
 set_state_doze:
 	dsim->dsim_doze = DSIM_DOZE_STATE_DOZE;
+#ifdef CONFIG_PANEL_CALL_MDNIE
+	mdnie_update_for_panel();
+#endif
 
 	call_panel_ops(dsim, displayon, dsim);
 
@@ -1260,7 +1264,7 @@ static int dsim_doze_suspend(struct dsim_device *dsim)
 #else
 	dsim_runtime_suspend(dsim->dev);
 #endif
-	
+
 exit_doze_disable:
 	dsim_info("-- %s\n", __func__);
 	return 0;
@@ -1989,7 +1993,6 @@ static int dsim_remove(struct platform_device *pdev)
 	pm_runtime_disable(dev);
 	dsim_put_clocks(dsim);
 	mutex_destroy(&dsim_rd_wr_mutex);
-	kfree(dsim);
 	dev_info(dev, "mipi-dsi driver removed\n");
 
 	return 0;
@@ -2068,6 +2071,7 @@ static struct platform_driver dsim_driver __refdata = {
 		.owner		= THIS_MODULE,
 		.pm		= &dsim_pm_ops,
 		.of_match_table	= of_match_ptr(dsim_match),
+		.suppress_bind_attrs = true,
 	}
 };
 

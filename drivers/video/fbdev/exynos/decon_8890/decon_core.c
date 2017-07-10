@@ -32,10 +32,13 @@
 #include <linux/smc.h>
 #include <linux/debugfs.h>
 #include <linux/of_gpio.h>
+#include <linux/sched.h>
 
 #include <media/exynos_mc.h>
 #include <video/mipi_display.h>
 #include <media/v4l2-subdev.h>
+
+#include <linux/sec_debug.h>
 
 #include "decon.h"
 #include "dsim.h"
@@ -137,6 +140,52 @@ static void vpp_dump(struct decon_device *decon);
 #ifdef CONFIG_USE_VSYNC_SKIP
 static atomic_t extra_vsync_wait;
 #endif /* CCONFIG_USE_VSYNC_SKIP */
+
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+extern unsigned int get_panel_bigdata(void);
+
+/* Gen Big Data Error for Decon's Bug
+
+return value
+1. 31 ~ 28 : decon_id
+2. 27 ~ 24 : decon eing pend register
+3. 23 ~ 16 : dsim underrun count
+4. 15 ~  8 : 0x0e panel register
+5.  7 ~  0 : 0x0a panel register
+*/
+
+unsigned int gen_decon_bug_bigdata(struct decon_device *decon)
+{
+	unsigned int value = 0, panel_value = 0;
+	unsigned int underrun_cnt = 0;
+
+	/* for decon id */
+	value = decon->id << 28;
+
+	if (decon->id == 0) {
+		/* for eint pend value */
+		value |= (decon->eint_pend_for_big & 0x0f) << 24;
+
+		/* for underrun count */
+		underrun_cnt = decon->underrun_stat.total_underrun_cnt;
+		if (underrun_cnt > 0xff) {
+			decon_info("DECON:INFO:%s:decon underrun exceed 1byte : %d\n",
+				__func__, underrun_cnt);
+			underrun_cnt = 0xff;
+		}
+		value |= underrun_cnt << 16;
+
+		/* for panel dump */
+		panel_value = get_panel_bigdata();
+		value |= panel_value & 0xffff;
+	}
+
+	decon_info("DECON:INFO:%s:big data : %x\n", __func__, value);
+	return value;
+}
+
+#endif
+
 
 void decon_dump(struct decon_device *decon)
 {
@@ -593,7 +642,6 @@ static inline bool is_decon_opaque_format(int format)
 	case DECON_PIXEL_FORMAT_ARGB_8888:
 	case DECON_PIXEL_FORMAT_ABGR_8888:
 		return false;
-
 	default:
 		return true;
 	}
@@ -1629,9 +1677,14 @@ int decon_wait_for_vsync(struct decon_device *decon, u32 timeout)
 
 	if (timeout && ret == 0) {
 		if (decon->eint_pend && decon->eint_mask) {
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+			decon->eint_pend_for_big = readl(decon->eint_pend);
 			decon_err("decon%d wait for vsync timeout(p:0x%x, m:0x%x)\n",
-				decon->id, readl(decon->eint_pend),
-				readl(decon->eint_mask));
+				decon->id, decon->eint_pend_for_big, readl(decon->eint_mask));
+#else
+			decon_err("decon%d wait for vsync timeout(p:0x%x, m:0x%x)\n",
+				decon->id, readl(decon->eint_pend),	readl(decon->eint_mask));
+#endif
 		} else {
 			decon_err("decon%d wait for vsync timeout\n", decon->id);
 		}
@@ -2416,6 +2469,7 @@ static int decon_reg_set_win_update_config(struct decon_device *decon, struct de
 	if (regs->need_update) {
 		decon_reg_ddi_partial_cmd(decon, &regs->update_win);
 		ret = decon_win_update_disp_config(decon, &regs->update_win);
+		DISP_SS_EVENT_LOG(DISP_EVT_PARTIAL_UPDATE, &decon->sd, ktime_set(0, 0));
 	}
 
 	return ret;
@@ -2693,6 +2747,7 @@ static void __decon_update_regs(struct decon_device *decon, struct decon_reg_dat
 				}
 			}
 
+			DISP_SS_EVENT_LOG(DISP_EVT_START_VPP_SET, &decon->sd, ktime_set(0, 0));
 			vpp_ret = v4l2_subdev_call(sd, core, ioctl,
 					VPP_WIN_CONFIG, &regs->vpp_config[i]);
 			if (vpp_ret) {
@@ -2896,6 +2951,9 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 	int vsync_wait_cnt = 0;
 #endif /* CONFIG_USE_VSYNC_SKIP */
 	char strace_str[20];
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+	unsigned int bug_err_num;
+#endif
 
 #if defined(CONFIG_LCD_HMT) || defined(CONFIG_LCD_DOZE_MODE)
 	struct dsim_device *dsim = NULL;
@@ -2962,15 +3020,26 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 #endif /* CONFIG_USE_VSYNC_SKIP */
 
 	decon_to_psr_info(decon, &psr);
+
+
 #if defined(CONFIG_LCD_HMT)
-	if ((regs->num_of_window) || ((dsim != NULL) && (dsim->priv.hmt_on))){
+#if defined(CONFIG_DECON_SELF_REFRESH)
+	if ((regs->num_of_window) || (decon->dsr_on) || ((dsim != NULL) && (dsim->priv.hmt_on))) {
+#else
+	if ((regs->num_of_window) || ((dsim != NULL) && (dsim->priv.hmt_on))) {
+#endif
+#else
+#if defined(CONFIG_DECON_SELF_REFRESH)
+	if (regs->num_of_window || decon->dsr_on) {
 #else
 	if (regs->num_of_window) {
+#endif
 #endif
 #if defined(CONFIG_LCD_HMT)
 		if ((dsim != NULL) && (dsim->priv.hmt_prev_status == 1))
 			dsim->priv.hmt_prev_status = 0;
 #endif
+		DISP_SS_EVENT_LOG(DISP_EVT_ENT_UPDATE, &decon->sd, ktime_set(0, 0));
 		__decon_update_regs(decon, regs);
 	} else {
 
@@ -3011,6 +3080,12 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 		decon_wait_for_vstatus(decon, 50);
 		if (decon_reg_wait_for_update_timeout(decon->id, SHADOW_UPDATE_TIMEOUT) < 0) {
 			decon_dump(decon);
+#ifdef CONFIG_LOGGING_BIGDATA_BUG
+			bug_err_num = gen_decon_bug_bigdata(decon);
+#ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
+			sec_debug_set_extra_info_decon(bug_err_num);
+#endif
+#endif
 #ifdef CONFIG_DSIM_ESD_REMOVE_DISP_DET
 			if (decon->state == DECON_STATE_ON && ret_vsync == -ETIMEDOUT)
 			{
@@ -3058,10 +3133,19 @@ static void decon_update_regs(struct decon_device *decon, struct decon_reg_data 
 		}
 
 #ifdef CONFIG_LCD_HMT
+#if defined(CONFIG_DECON_SELF_REFRESH)
+		if (!decon->id && decon->pdata->trig_mode == DECON_HW_TRIG
+			&& decon->pdata->out_type == DECON_OUT_DSI && dsim->priv.hmt_on == 0 && !decon->dsr_on)
+#else
 		if (!decon->id && decon->pdata->trig_mode == DECON_HW_TRIG
 			&& decon->pdata->out_type == DECON_OUT_DSI && dsim->priv.hmt_on == 0)
+#endif
+#else
+#if defined(CONFIG_DECON_SELF_REFRESH)
+		if (!decon->id && decon->pdata->trig_mode == DECON_HW_TRIG && !decon->dsr_on)
 #else
 		if (!decon->id && decon->pdata->trig_mode == DECON_HW_TRIG)
+#endif
 #endif
 			decon_reg_set_trigger(decon->id, &psr, DECON_TRIG_DISABLE);
 	}
@@ -3200,11 +3284,11 @@ static void decon_dsu_handler(struct decon_device *decon)
 	/* 1 frame delay after Display-off : change of PPS is showing at once. therefore, PPS change must be next frame of display-off */
 	v4l2_subdev_call(decon->output_sd, core, ioctl, DSIM_IOC_DISPLAY_ONOFF, (void*) 0);
 	usleep_range(17000, 17000);
-#endif	
+#endif
 #ifdef CONFIG_FB_DSU_REG_LOCK
 	decon->dsu_lock_cnt = 2;
 	v4l2_subdev_call(decon->output_sd, core, ioctl, DSIM_IOC_REG_LOCK, (void*) 1);
-#endif	
+#endif
 #endif
 
 	loop_out = false;
@@ -3412,10 +3496,10 @@ static int decon_set_win_config(struct decon_device *decon,
 	if( decon->dsu_lock_cnt > 0  ) {
 		decon->dsu_lock_cnt--;
 		if( decon->dsu_lock_cnt == 0 ) {
-#ifdef CONFIG_FB_DSU_REG_LOCK			
+#ifdef CONFIG_FB_DSU_REG_LOCK
 			v4l2_subdev_call(decon->output_sd, core, ioctl, DSIM_IOC_REG_LOCK, (void*) 0);
 #endif
-#ifdef CONFIG_FB_DSU_NOT_SEAMLESS			
+#ifdef CONFIG_FB_DSU_NOT_SEAMLESS
 			v4l2_subdev_call(decon->output_sd, core, ioctl, DSIM_IOC_DISPLAY_ONOFF, (void*) 1);
 #endif
 		}
@@ -3917,6 +4001,9 @@ static int decon_ioctl(struct fb_info *info, unsigned int cmd,
 	struct decon_device *decon = win->decon;
 	int ret = 0;
 	u32 crtc;
+#ifdef CONFIG_DECON_SELF_REFRESH
+	bool dsr_enable;
+#endif
 #ifdef CONFIG_LCD_DOZE_MODE
 	u32 pwr_mode;
 #endif
@@ -4044,6 +4131,22 @@ static int decon_ioctl(struct fb_info *info, unsigned int cmd,
 		}
 		break;
 #endif
+#ifdef CONFIG_DECON_SELF_REFRESH
+	case S3CFB_DECON_SELF_REFRESH:
+		if (get_user(dsr_enable, (bool __user *)arg)) {
+			ret = -EFAULT;
+			break;
+		}
+		if (dsr_enable) {
+			decon_lpd_block_exit(decon);
+			DISP_SS_EVENT_LOG(DISP_EVT_DSR_ENABLE, &decon->sd, ktime_set(0, 0));
+		} else {
+			decon_lpd_unblock(decon);
+			DISP_SS_EVENT_LOG(DISP_EVT_DSR_DISABLE, &decon->sd, ktime_set(0, 0));
+		}
+		decon->dsr_on = dsr_enable;
+		break;
+#endif
 	default:
 		decon_err("%s : invalied command\n", __func__);
 		ret = -ENOTTY;
@@ -4056,6 +4159,7 @@ static int decon_ioctl(struct fb_info *info, unsigned int cmd,
 
 	return ret;
 }
+
 
 int decon_release(struct fb_info *info, int user)
 {
@@ -5552,7 +5656,6 @@ static int decon_remove(struct platform_device *pdev)
 		decon_release_windows(decon->windows[i]);
 
 	debugfs_remove_recursive(decon->debug_root);
-	kfree(decon);
 
 	decon_info("remove sucessful\n");
 	return 0;
@@ -5585,6 +5688,7 @@ static struct platform_driver decon_driver __refdata = {
 		.owner	= THIS_MODULE,
 		.pm	= &decon_pm_ops,
 		.of_match_table = of_match_ptr(decon_device_table),
+		.suppress_bind_attrs = true,
 	}
 };
 

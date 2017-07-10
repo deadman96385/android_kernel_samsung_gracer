@@ -30,6 +30,8 @@
 #include "./panels/decon_lcd.h"
 #include "regs-dsim.h"
 #include "dsim_common.h"
+#include "./panels/poc.h"
+#include "./panels/mdnie.h"
 
 #define DSIM_PAD_SINK		0
 #define DSIM_PADS_NUM		1
@@ -183,6 +185,10 @@ struct panel_private {
 	unsigned int mcd_on;
 #endif
 
+#ifdef CONFIG_PANEL_GRAY_SPOT
+	unsigned int gray_spot;
+#endif
+
 #ifdef CONFIG_LCD_HMT
 	unsigned int hmt_on;
 	unsigned int hmt_prev_status;
@@ -216,6 +222,18 @@ struct panel_private {
 	unsigned int adaptive_control;
 	int lux;
 	struct class *mdnie_class;
+
+#ifdef CONFIG_DISPLAY_USE_INFO
+	struct notifier_block dpui_notif;
+#endif
+
+#ifdef CONFIG_SUPPORT_POC_FLASH
+	struct panel_poc_device poc_dev;
+	unsigned int poc_op;
+	unsigned int poc_allow_chechsum_read;
+	unsigned char poc_ctrl_set[4];
+	unsigned char poc_checksum_set[5];
+#endif
 };
 
 struct dsim_panel_ops {
