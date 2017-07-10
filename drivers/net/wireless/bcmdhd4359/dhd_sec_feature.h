@@ -1,7 +1,7 @@
 /*
  * Customer HW 4 dependant file
  *
- * Copyright (C) 1999-2016, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -89,7 +89,6 @@
 
 #if defined(CONFIG_ARCH_MSM8996) || defined(CONFIG_SOC_EXYNOS8890)
 #define SUPPORT_BCM4359_MIXED_MODULES
-#define SUPPORT_RANDOM_MAC_SCAN
 #endif /* CONFIG_ARCH_MSM8996 || CONFIG_SOC_EXYNOS8890 */
 
 /* For EXYNOS PCIe RC Control */
